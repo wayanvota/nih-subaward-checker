@@ -72,11 +72,11 @@ async function draftRequestWithModel({ form, decision, baseline }) {
       {
         role: "system",
         content:
-          "Draft a concise NIH prior-approval request narrative. The deterministic rule engine has already decided whether prior approval is required. Do not contradict that determination. Include placeholders where data is missing."
+          "Draft a concise NIH prior-approval request narrative. The deterministic rule engine has already decided whether prior approval is required. Do not contradict that determination. Use supplied field values when present. Use placeholders only for fields that are blank."
       },
       {
         role: "user",
-        content: `Draft an eRA Commons Prior Approval Module "Other Request" for NOT-OD-26-062. Use placeholders for grant number, PI, and missing amounts. Include: request subject, proposed subrecipient, scope, budget, reason the arrangement was not in the approved application, compliance statement, and requested NIH action.\n\nNotice: ${NIH_NOTICE.id}, effective ${NIH_NOTICE.effectiveDate}, path ${NIH_NOTICE.eraPath}\nDecision: ${JSON.stringify(decision)}\nBaseline extraction: ${JSON.stringify(baseline)}\nProposed change: ${JSON.stringify(form)}`
+        content: `Draft an eRA Commons Prior Approval Module "Other Request" for NOT-OD-26-062. Use the supplied grant number, PI, subrecipient, scope, and budget exactly when those fields are present. Use bracketed placeholders only for fields that are blank. Include: request subject, proposed subrecipient, scope, budget, reason the arrangement was not in the approved application, compliance statement, and requested NIH action.\n\nNotice: ${NIH_NOTICE.id}, effective ${NIH_NOTICE.effectiveDate}, path ${NIH_NOTICE.eraPath}\nDecision: ${JSON.stringify(decision)}\nBaseline extraction: ${JSON.stringify(baseline)}\nProposed change: ${JSON.stringify(form)}`
       }
     ]
   });
