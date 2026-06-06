@@ -44,4 +44,10 @@ npm run build
 
 ## Deploy
 
-Deploy to Vercel as a Next.js app and add `OPENAI_API_KEY` as a project environment variable.
+Deploy to Render as a Node web service and add `OPENAI_API_KEY` as a project environment variable.
+
+Recommended Render settings:
+
+- Build command: `npm install && npm run build`
+- Start command: `npm start`
+- Environment variables: `OPENAI_API_KEY`, and optionally `NODE_VERSION=22`
