@@ -38,9 +38,18 @@ Set `OPENAI_API_KEY` in `.env.local`.
 ## Checks
 
 ```bash
-npm test
-npm run build
+npm ci
+npx playwright install chromium
+npm run test:ci
 ```
+
+The end-to-end gate builds and serves the production Next.js application, then
+runs exactly 10 user-behavior and 10 adversarial browser/API categories. Only
+the external OpenAI drafting service is replaced with a deterministic local
+HTTP fixture. See [E2E-TEST-REPORT.md](E2E-TEST-REPORT.md).
+
+CI requires no OpenAI key. Live-provider checks are optional, separately
+authorized smoke tests and never replace the deterministic gate.
 
 ## Deploy
 
