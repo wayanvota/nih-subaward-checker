@@ -35,8 +35,7 @@ active. No credential or public service is required in CI.
 
 ## Verification record
 
-Status: local gate passed on 2026-09-11. GitHub Actions verification is pending
-the branch push.
+Status: local gate and GitHub Actions run 34665235628 passed on 2026-09-11.
 
 - Existing deterministic rule tests: 4 passed.
 - Next.js 16.3.3 production build: passed on Node 22.16.0.
