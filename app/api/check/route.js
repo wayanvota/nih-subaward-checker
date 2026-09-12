@@ -2,6 +2,38 @@ import OpenAI from "openai";
 import { evaluatePriorApproval, NIH_NOTICE } from "@/lib/decision";
 
 export const runtime = "nodejs";
+const MAX_REQUEST_BYTES = 2 * 1024 * 1024;
+const MAX_PDF_BYTES = 1024 * 1024;
+const model = process.env.OPENAI_MODEL || "gpt-4.1-mini";
+
+class RequestError extends Error {
+  constructor(message, status) {
+    super(message);
+    this.status = status;
+  }
+}
+
+function jsonResponse(payload, status = 200) {
+  return Response.json(payload, {
+    status,
+    headers: {
+      "cache-control": "no-store",
+      "x-content-type-options": "nosniff",
+      "x-frame-options": "DENY",
+      "referrer-policy": "no-referrer"
+    }
+  });
+}
+
+function openAIClient() {
+  if (!process.env.OPENAI_API_KEY) {
+    throw new RequestError("AI extraction or drafting is unavailable. Review the decision manually.", 503);
+  }
+  return new OpenAI({
+    apiKey: process.env.OPENAI_API_KEY,
+    baseURL: process.env.OPENAI_BASE_URL || undefined
+  });
+}
 
 function getString(formData, key) {
   const value = formData.get(key);
@@ -11,6 +43,12 @@ function getString(formData, key) {
 async function extractPdfText(file) {
   if (!file || typeof file.arrayBuffer !== "function" || file.size === 0) {
     return "";
+  }
+  if (file.type !== "application/pdf") {
+    throw new RequestError(`${file.name || "The uploaded file"} must be a PDF.`, 400);
+  }
+  if (file.size > MAX_PDF_BYTES) {
+    throw new RequestError(`${file.name || "The uploaded PDF"} is too large. Use a PDF smaller than 1 MB.`, 413);
   }
 
   const buffer = Buffer.from(await file.arrayBuffer());
@@ -32,9 +70,9 @@ async function extractBaselineWithModel({ text, manualBaseline }) {
     };
   }
 
-  const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+  const client = openAIClient();
   const response = await client.responses.create({
-    model: "gpt-4.1-mini",
+    model,
     input: [
       {
         role: "system",
@@ -65,9 +103,9 @@ async function extractBaselineWithModel({ text, manualBaseline }) {
 async function draftRequestWithModel({ form, decision, baseline }) {
   if (!decision.required) return "";
 
-  const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+  const client = openAIClient();
   const response = await client.responses.create({
-    model: "gpt-4.1-mini",
+    model,
     input: [
       {
         role: "system",
@@ -97,53 +135,73 @@ function buildAuditTrail({ form, decision, baseline }) {
 }
 
 export async function POST(request) {
-  if (!process.env.OPENAI_API_KEY) {
-    return Response.json(
-      { error: "OPENAI_API_KEY is not configured for extraction and drafting." },
-      { status: 500 }
+  try {
+    const contentLength = Number(request.headers.get("content-length") || 0);
+    if (contentLength > MAX_REQUEST_BYTES) {
+      throw new RequestError("The submitted information is too large.", 413);
+    }
+    let formData;
+    try {
+      formData = await request.formData();
+    } catch {
+      throw new RequestError("Submit the checker fields as form data.", 400);
+    }
+    const submittedBytes = Array.from(formData.values()).reduce(
+      (total, value) => total + (typeof value === "string" ? Buffer.byteLength(value) : value.size),
+      0
+    );
+    if (submittedBytes > MAX_REQUEST_BYTES) {
+      throw new RequestError("The submitted information is too large.", 413);
+    }
+    const uploadedFile = formData.get("baselinePdf");
+    const form = {
+      grantNumber: getString(formData, "grantNumber"),
+      piName: getString(formData, "piName"),
+      manualBaseline: getString(formData, "manualBaseline"),
+      subrecipientName: getString(formData, "subrecipientName"),
+      scope: getString(formData, "scope"),
+      budget: getString(formData, "budget"),
+      appearedInApprovedApplication: getString(formData, "appearedInApprovedApplication"),
+      domesticForeign: getString(formData, "domesticForeign"),
+      isSubaward: getString(formData, "isSubaward"),
+      isNewToProject: getString(formData, "isNewToProject")
+    };
+
+    const pdfText = await extractPdfText(uploadedFile);
+    const baseline = await extractBaselineWithModel({
+      text: pdfText,
+      manualBaseline: form.manualBaseline
+    });
+
+    const decision = evaluatePriorApproval({
+      isSubaward: form.isSubaward,
+      isNewToProject: form.isNewToProject,
+      notInApprovedApplication:
+        form.appearedInApprovedApplication === "yes"
+          ? false
+          : form.appearedInApprovedApplication === "no"
+            ? true
+            : undefined,
+      isDomestic:
+        form.domesticForeign === "domestic"
+          ? true
+          : form.domesticForeign === "foreign"
+            ? false
+            : undefined
+    });
+
+    const draft = await draftRequestWithModel({ form, decision, baseline });
+    const auditTrail = buildAuditTrail({ form, decision, baseline });
+
+    return jsonResponse({ decision, draft, auditTrail });
+  } catch (error) {
+    if (error instanceof RequestError) {
+      return jsonResponse({ error: error.message }, error.status);
+    }
+    console.error("NIH subaward check failed", error);
+    return jsonResponse(
+      { error: "The checker could not complete the review. Apply the cited rule manually." },
+      502
     );
   }
-
-  const formData = await request.formData();
-  const uploadedFile = formData.get("baselinePdf");
-  const form = {
-    grantNumber: getString(formData, "grantNumber"),
-    piName: getString(formData, "piName"),
-    manualBaseline: getString(formData, "manualBaseline"),
-    subrecipientName: getString(formData, "subrecipientName"),
-    scope: getString(formData, "scope"),
-    budget: getString(formData, "budget"),
-    appearedInApprovedApplication: getString(formData, "appearedInApprovedApplication"),
-    domesticForeign: getString(formData, "domesticForeign"),
-    isSubaward: getString(formData, "isSubaward"),
-    isNewToProject: getString(formData, "isNewToProject")
-  };
-
-  const pdfText = await extractPdfText(uploadedFile);
-  const baseline = await extractBaselineWithModel({
-    text: pdfText,
-    manualBaseline: form.manualBaseline
-  });
-
-  const decision = evaluatePriorApproval({
-    isSubaward: form.isSubaward,
-    isNewToProject: form.isNewToProject,
-    notInApprovedApplication:
-      form.appearedInApprovedApplication === "yes"
-        ? false
-        : form.appearedInApprovedApplication === "no"
-          ? true
-          : undefined,
-    isDomestic:
-      form.domesticForeign === "domestic"
-        ? true
-        : form.domesticForeign === "foreign"
-          ? false
-          : undefined
-  });
-
-  const draft = await draftRequestWithModel({ form, decision, baseline });
-  const auditTrail = buildAuditTrail({ form, decision, baseline });
-
-  return Response.json({ decision, draft, auditTrail });
 }

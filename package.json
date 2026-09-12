@@ -7,7 +7,12 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start -p ${PORT:-3000}",
-    "test": "node --test"
+    "test": "node --test tests/*.test.js",
+    "test:e2e": "playwright test",
+    "test:ci": "npm test && npm run build && npm run test:e2e"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.63.0"
   },
   "dependencies": {
     "next": "^16.3.3",
